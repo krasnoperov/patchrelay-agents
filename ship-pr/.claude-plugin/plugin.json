@@ -1,0 +1,14 @@
+{
+  "name": "ship-pr",
+  "version": "0.1.0",
+  "description": "Blocking-gate workflow for delivering a PR end-to-end with review-quill and merge-steward.",
+  "homepage": "https://github.com/krasnoperov/patchrelay-agents",
+  "license": "MIT",
+  "keywords": [
+    "patchrelay",
+    "review-quill",
+    "merge-steward",
+    "agents",
+    "claude-code"
+  ]
+}

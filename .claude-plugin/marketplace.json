@@ -1,0 +1,15 @@
+{
+  "name": "patchrelay",
+  "owner": {
+    "name": "PatchRelay contributors",
+    "url": "https://github.com/krasnoperov/patchrelay"
+  },
+  "description": "Agent skills for pairing Claude (and other agents) with the PatchRelay stack: review-quill for PR review, merge-steward for the merge queue.",
+  "plugins": [
+    {
+      "name": "ship-pr",
+      "source": "./ship-pr",
+      "description": "Shepherd a non-draft PR through review-quill approval and merge-steward's merge queue with blocking --wait gates. React to requested changes, failing checks, and queue incidents instead of polling on a fixed cron."
+    }
+  ]
+}
