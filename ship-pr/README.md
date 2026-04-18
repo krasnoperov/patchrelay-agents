@@ -1,24 +1,17 @@
 # ship-pr
 
-A Claude Code skill that teaches an agent how to deliver a PR from "pushed" to "merged" by cooperating with two independent services:
+A Claude Code skill that turns "I think this PR is ready" into "merged" — in one command.
 
-- [`review-quill`](https://github.com/krasnoperov/patchrelay/tree/main/packages/review-quill) — reviews the PR and publishes an `APPROVE` or `REQUEST_CHANGES` review.
-- [`merge-steward`](https://github.com/krasnoperov/patchrelay/tree/main/packages/merge-steward) — admits approved PRs into a merge queue, validates them against the latest `main` with speculative execution, and fast-forwards `main` to the tested result.
+You finish your work on a branch. You push. You think the PR is good enough to publish. Instead of switching into babysit mode — watching CI, reading review comments, pushing fixups, checking whether the merge queue picked it up — you invoke `ship-pr` once and hand the loop to the agent.
 
-Both tools expose a `pr status --wait` verb with stable exit codes. This skill wires those verbs together so an agent blocks on terminal outcomes (approved / merged / requested-changes / failing-checks / evicted) instead of polling on a fixed timer.
+The agent:
 
-## What the skill does
+1. **Self-checks before publishing.** Reads the diff, looks for obvious issues (stray debug output, stale PR description, missing tests), fixes trivial ones in-place, reconciles the PR description against the actual commits, runs local checks, then marks the PR ready.
+2. **Waits for [`review-quill`](https://github.com/krasnoperov/patchrelay/tree/main/packages/review-quill) to post a review** via `review-quill pr status --wait`. On `REQUEST_CHANGES` (exit 2), it reads the reviewer's inline comments and failing-check details out of the JSON, fixes the code literally as requested, pushes, and re-enters the wait.
+3. **Waits for [`merge-steward`](https://github.com/krasnoperov/patchrelay/tree/main/packages/merge-steward) to deliver the PR** via `merge-steward pr status --wait`. On `checks_failing` / `evicted` (exit 2), it reads the queue incident or failing-job names, fixes the root cause, pushes, and restarts from the review wait.
+4. **Finishes** when `merge-steward` reports `merged` and reports back to you with the merge commit SHA plus what happened along the way.
 
-When invoked, the agent:
-
-1. Self-reviews the diff and the PR description before publishing.
-2. Runs `review-quill pr status --wait` and interprets the exit code.
-   - On `REQUEST_CHANGES` (exit 2), reads the reviewer's body + inline comments and the failing-check list, fixes the code, pushes, and re-enters the wait.
-3. On approval (exit 0), runs `merge-steward pr status --wait`.
-   - On `evicted` / `checks_failing` (exit 2), reads the queue incident or failing-check names, fixes the root cause, pushes, and restarts from step 2.
-4. Finishes when `merge-steward` reports `merged`.
-
-Throughout, the agent never runs an outer polling loop — the `--wait` flag is the contract.
+Throughout, there is no outer polling loop. The agent blocks on each `--wait` call and only wakes on a terminal state. That is the contract.
 
 ## Install
 
@@ -27,15 +20,15 @@ Throughout, the agent never runs an outer polling loop — the `--wait` flag is 
 /plugin install ship-pr@patchrelay
 ```
 
-The skill is then invoked as `/ship-pr:ship-pr` in Claude Code.
+The skill is then invoked as `/ship-pr:ship-pr` in Claude Code. In practice you can also just say "ship this PR" / "ship it" — Claude will recognize the skill by description.
 
 ## Prerequisites
 
 The skill drives CLIs; it does not bundle them. On your machine you need:
 
-- `review-quill` (`npm install -g review-quill`) attached to your repo.
-- `merge-steward` (`npm install -g merge-steward`) attached to your repo.
-- `gh` for the occasional fallback details link.
+- [`review-quill`](https://github.com/krasnoperov/patchrelay/tree/main/packages/review-quill) (`npm install -g review-quill`) attached to the target repo.
+- [`merge-steward`](https://github.com/krasnoperov/patchrelay/tree/main/packages/merge-steward) (`npm install -g merge-steward`) attached to the target repo.
+- `gh` for PR metadata, creating drafts, and pulling CI logs on failure.
 
 Attach each tool to the target repo once:
 
@@ -44,17 +37,19 @@ review-quill repo attach owner/repo
 merge-steward attach owner/repo
 ```
 
-If you want these services running autonomously on webhooks (without a human-in-the-loop agent), install [`patchrelay`](https://github.com/krasnoperov/patchrelay) as well — it will drive them through Linear + GitHub webhooks.
+If you want these services driven by webhooks instead of your agent, install [`patchrelay`](https://github.com/krasnoperov/patchrelay) as well — it runs the same loop autonomously.
 
 ## When to use it
 
-Use the skill when you have pushed a non-draft PR and want the agent to own the delivery loop until merge. It is the right choice when:
-
-- You use `review-quill` + `merge-steward` in a supervised mode and want an agent (Claude Code, Cursor, Codex CLI, etc.) to close the loop with you in the room.
+- You have pushed a branch, opened (or are about to open) a PR, and you consider the work complete.
+- You want to close the laptop and come back to a merged PR, not babysit CI for 45 minutes.
 - You want to parallelize many PRs across many agents without each one rolling its own polling logic.
-- You want deterministic, exit-code-driven flow control rather than LLM-judged "is it done yet?" reasoning.
 
-Use `patchrelay` instead when you want the loop to be fully autonomous, Linear-driven, and restartable across process crashes.
+## When **not** to use it
+
+- The PR needs scope negotiation, not mechanical review fixes. Talk to the human reviewer first.
+- The repo is not attached to both `review-quill` and `merge-steward`. The skill will exit with a clear error, but you are better off attaching them first.
+- You want the agent to *also* implement the feature. This skill takes over at "I think the work is done" — it is not an implementation loop.
 
 ## License
 
