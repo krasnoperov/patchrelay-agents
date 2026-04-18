@@ -6,33 +6,33 @@ This repository is a Claude Code **plugin marketplace**. It ships skills; it doe
 
 ## What you actually get
 
-Two services that together give your agents two superpowers:
+Two services that compose into a tested PR delivery loop:
 
 ### [`review-quill`](https://github.com/krasnoperov/patchrelay/tree/main/packages/review-quill) — GitHub-native PR review bot
 
-- Watches every PR on repos you attach. Sees a new head, reviews it, publishes an ordinary GitHub `APPROVE` or `REQUEST_CHANGES` review with inline comments.
-- Reviews from a **real local checkout of the exact head SHA**, not the GitHub files API. Reviewers see the same state your tests saw.
-- Ships with a `--wait-for-green-checks` gate if you want, but the default is to review as soon as the head updates — with decent dev tests your PRs are usually green and you do not need the gate.
-- Zero coupling to PatchRelay. Zero coupling to Claude. All signaling goes through normal GitHub reviews, so every agent, IDE, or human in your org can read the output without installing anything else.
+- Watches every PR on attached repos. New head → reviews it → publishes an ordinary GitHub `APPROVE` or `REQUEST_CHANGES` review with inline comments.
+- Reviews from a **real local checkout of the exact head SHA**, not the GitHub files API. The reviewer sees what your tests see.
+- The default is to review as soon as the head updates; enable `--wait-for-green-checks` if your test suite is flaky.
+- Zero coupling to PatchRelay, zero coupling to Claude. Signaling flows through normal GitHub reviews, so anyone with repo access can read the output.
 
 ### [`merge-steward`](https://github.com/krasnoperov/patchrelay/tree/main/packages/merge-steward) — GitHub-native serial merge queue
 
-- Admits approved, green PRs into a queue and **speculatively integrates each one on top of the current `main`**. CI runs on the integrated SHA, not just the PR head.
+- Admits approved, green PRs and **speculatively integrates each one on top of the current `main`**. CI runs on the integrated SHA, not the PR head.
 - Fast-forwards `main` to the tested result, so what lands is exactly what was validated.
-- Evicts with a durable incident record and a GitHub check run on failure. An agent (or a human) sees the incident, fixes the cause, and the PR gets re-admitted.
-- Zero coupling to PatchRelay. Zero coupling to Claude. Communicates through GitHub: labels, checks, reviews, pushes.
+- Evicts with a durable incident record and a GitHub check run on failure. An agent or human sees the incident, fixes the cause, and the PR gets re-admitted.
+- Same zero-coupling story: communicates through GitHub labels, checks, reviews, pushes.
 
-### Why this combination is transformational
+### What the pair buys you
 
-- **PRs are delivered fully tested against the latest `main`.** No more "CI was green yesterday, breaks on merge today." The queue catches the integration bug before `main` ever sees it.
-- **Most failures have mechanical fixes.** Address the reviewer's inline comment. Rerun the flaky job. Rebase on `main`. Resolve a conflict the steward surfaced during speculation. None of these require human judgment in the usual case — they need an agent with access to the diff.
+- **PRs are delivered tested against the latest `main`.** The queue catches integration bugs before `main` ever sees them.
+- **Many failures have mechanical fixes an agent can apply.** Address an inline comment, rerun a flaky job, rebase on `main`, resolve a conflict the steward surfaced during speculation.
 - **No prerequisites beyond GitHub.** No Linear, no self-hosted control plane, no proprietary SDK. A GitHub App, a webhook, and `npm install -g`.
 
 ## Two ways to drive them
 
 ### 1. Fully autonomous — [`patchrelay`](https://github.com/krasnoperov/patchrelay)
 
-PatchRelay receives GitHub webhooks (review posted, CI failed, queue evicted, merge landed) and automatically starts Codex `app-server` sessions to repair the PR. No human in the room. This is the right choice when:
+PatchRelay receives GitHub webhooks (review posted, CI failed, queue evicted, merge landed) and automatically starts Codex `app-server` sessions to repair the PR. No human in the room. Right choice when:
 
 - You want to hand off a backlog and come back to merged PRs.
 - You have a Linear workspace that can delegate issues to the harness.
@@ -42,17 +42,13 @@ Setup lives in the main repo's README.
 
 ### 2. Supervised — install a skill here and drive from your agent
 
-When you are already sitting in Claude Code (or Cursor, or Codex CLI, or anything that reads Claude Code skills / plugins), you do not need PatchRelay's full harness. You just need your agent to know how to **cooperate with** `review-quill` and `merge-steward` — wait for approvals, read the failure reason, fix it, push, and repeat.
-
-That is what this repo ships.
+When you are already sitting in Claude Code (or Cursor, or Codex CLI, or anything that reads Claude Code skills / plugins), you do not need PatchRelay's full harness. You just need your agent to know how to cooperate with `review-quill` and `merge-steward` — wait for approvals, read the failure reason, fix it, push, and repeat.
 
 ## Skills in this marketplace
 
 | Skill | Purpose |
 |-|-|
 | [`ship-pr`](./ship-pr/) | Shepherd a non-draft PR from "pushed" to "merged". Blocks on `review-quill pr status --wait` and `merge-steward pr status --wait`, interprets exit codes, fixes requested changes and failing checks, re-enters the wait. No polling loop. |
-
-More skills will land here as patterns harden.
 
 ## Install
 
@@ -70,7 +66,7 @@ Install a skill:
 
 Plugins are cached under `~/.claude/plugins/cache/` and survive across sessions. Run `/plugin uninstall ship-pr@patchrelay` to remove one.
 
-For a local-development install (e.g. you cloned this repo and want to iterate on the skill):
+For local development (you cloned this repo and want to iterate on a skill):
 
 ```
 /plugin marketplace add /path/to/patchrelay-agents
@@ -97,9 +93,8 @@ Full setup instructions (GitHub App, webhook, systemd, TLS ingress) live in each
 
 - [review-quill README](https://github.com/krasnoperov/patchrelay/tree/main/packages/review-quill)
 - [merge-steward README](https://github.com/krasnoperov/patchrelay/tree/main/packages/merge-steward)
-- [Main PatchRelay repo](https://github.com/krasnoperov/patchrelay) — for the full three-service story
 
-## Design principle: stable contracts, not tool-specific magic
+## Design principle: stable CLI contracts
 
 The skills in this marketplace are intentionally thin. They compose CLI verbs (`pr status --wait`, `queue show`, `attempts`) with stable exit codes. That means:
 
