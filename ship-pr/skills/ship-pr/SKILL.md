@@ -48,7 +48,7 @@ Interpret the exit code:
   - `reviewRequest.body` and `reviewRequest.inlineComments[]` (path, line, body, author) when a reviewer requested changes.
   - `failedChecks[]` and `pendingChecks[]` (`name`, `status`, `conclusion`, `detailsUrl`) when CI blocked the review.
 
-  Address the feedback **literally in the code**. For each inline comment, open the file at the listed line and make the change the reviewer asked for. Push a new commit. Re-enter Phase 2. The latest head SHA supersedes prior attempts automatically.
+  Triage before you fix — see [Triage before you fix](#triage-before-you-fix) below. Restore review-readiness, not just the cited line. Then push a new commit and re-enter Phase 2. The latest head SHA supersedes prior attempts automatically.
 - **`4`** — wait timed out. Before extending, run `review-quill attempts --json` to see if a review is actually in flight. If yes, extend `--timeout` and rerun. If not, something is wrong — surface it.
 - **`1`** — usage or config error. Fix the invocation (unattached repo, bad flags). Do not retry blindly.
 
@@ -65,11 +65,38 @@ Interpret the exit code:
 - **`0`** (`merged` or `merged_outside_queue`) — shipped. You are done.
 - **`2`** — terminal failure. Read `kind`:
   - `changes_requested` — a reviewer requested changes *after* approval was recorded. Restart from Phase 2.
-  - `checks_failing` — required CI checks failed on the PR head or the speculative integrated SHA. The JSON's `github.checks[]` lists failing names and `detailsUrl`. Use `gh run view <run-id> --log-failed` to pull the actual failure, fix it, push, restart from Phase 2.
+  - `checks_failing` — required CI checks failed on the PR head or the speculative integrated SHA. The JSON's `github.checks[]` lists failing names and `detailsUrl`. Pull the actual failure with `gh run view <run-id> --log-failed`, triage the root cause (see [Triage before you fix](#triage-before-you-fix)), fix it plus any adjacent jobs at risk of the same cause, push, restart from Phase 2.
   - `evicted` / `dequeued` — the queue removed the entry. Run `merge-steward queue show --pr <num> --json` for the event / incident trail. Typical causes: stale speculative branch, conflicting `main` advance (rebase needed), upstream incident. Fix the root cause, push, restart from Phase 2.
   - `closed` — the PR was closed without merging. Stop and ask the user.
 - **`4`** — timed out. Run `merge-steward queue show --pr <num>`. If healthy and slow, extend the timeout. If an incident is pending, treat as exit `2`.
 - **`1`** — usage or config. Fix.
+
+## Triage before you fix
+
+Both exit-2 paths are easy to get wrong in opposite directions. Avoid both.
+
+### Do not blindly patch the cited symptom
+
+A reviewer's comment on line 42 is **evidence** the branch is not review-ready, not an isolated chore. A failing CI job is **one instance** of a root cause that may affect other jobs in the suite. Before pushing a fix:
+
+1. Read **all** inline review comments for the PR, not just the triggering one. `gh api repos/<owner>/<repo>/pulls/<num>/comments?per_page=100` is the quickest way. The goal is to see the full surface of what the reviewer thinks is unready.
+2. Read the full diff the reviewer saw: `review-quill diff` when available, or `git diff origin/main...HEAD` as a fallback. Do not infer from the comment alone.
+3. **Infer the underlying concern or invariant.** Is this comment about a missing null check, or about a class of missing null checks the branch has elsewhere? Is this failing test about one bad assertion, or about a behavior change the test is correctly catching?
+4. **Inspect adjacent code paths that could fail for the same reason.** Fix them too. A PR that patches the one cited line and ignores the three other sites with the same bug will come back with another round of requested changes.
+5. For a CI failure, read the failing log (`gh run view <run-id> --log-failed`), identify the root cause, and check whether that same cause would fail other jobs in the suite. Fix the root cause, not the first visible symptom.
+
+### Do not silently expand into a broader rewrite
+
+You are restoring review-readiness, not refactoring the codebase. The reviewer did not hand you a license to restructure the module.
+
+- Stay inside the concrete concern raised. If a comment asks for a null check, add the null check and the adjacent ones in the same flow — do not extract helpers, rename types, or reshape surrounding code.
+- Do not widen into unrelated polish or follow-up cleanup. If you notice a broader inconsistency, **mention it in your final report to the user** as follow-up context; do not fix it in this PR.
+- Do not change workflow files, dependency installation, CI config, or unrelated tests unless the failing logs clearly point there.
+- Do not change test expectations unless the test is genuinely wrong.
+
+### When triage says "stop"
+
+If the underlying concern is not a mechanical fix — the reviewer is asking for a different approach, the failing check is infrastructure-level, the merge conflict is a semantic contradiction between two intents — stop and surface it to the user instead of guessing. Two iteration cycles on the same failure with no clear diagnosis is the other hard stop. See [Failures to escalate](#failures-to-escalate) below.
 
 ## The iteration loop
 
@@ -90,7 +117,7 @@ If the same fix gets bounced twice with unclear signal, surface to the user inst
 
 These are the patterns where you should not escalate. Fix and keep going:
 
-- Reviewer asked for a rename, a missing test, a missing null check, extracted helper. Apply the change literally from the inline comment.
+- Reviewer asked for a rename, a missing test, a missing null check, extracted helper. Apply the change — and check whether the same concern exists in adjacent code (see Triage).
 - Lint / typecheck red on the speculative SHA, green locally. Usually version drift or interaction with a commit that landed on `main` since you branched. Rebase, rerun local checks, push.
 - Flaky test. If `detailsUrl` shows a failure clearly unrelated to the diff that reproduces intermittently, the steward's `flakyRetries` may already handle it; otherwise `gh run rerun --failed <run-id>`.
 - Merge conflict surfaced by speculative invalidation. Rebase on `main`, resolve, push.
